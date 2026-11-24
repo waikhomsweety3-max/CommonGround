@@ -114,9 +114,10 @@ const [showHouseholds, setShowHouseholds] = useState(true);
       setWorkers(w);
       setRequests(r);
       setMessage("");
-    } catch {
-      setMessage("Backend connection failed. Please start Flask.");
-    } finally {
+    } catch (error) {
+  console.error("Backend error:", error);
+  setMessage("Backend error: " + error.message);
+} finally {
       setLoading(false);
     }
   }
