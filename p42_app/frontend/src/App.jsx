@@ -80,6 +80,17 @@ const navigation = [
 ];
 
 export default function App() {
+ const getGreeting = () => {
+  const hour = new Date().getHours();
+
+  if (hour >= 5 && hour < 12) {
+    return "Good morning 👋";
+  } else if (hour >= 12 && hour < 17) {
+    return "Good afternoon 👋";
+  } else {
+    return "Good evening 👋";
+  }
+};
     const [showWorkers, setShowWorkers] = useState(true);
 const [showHouseholds, setShowHouseholds] = useState(true);
   const [tab, setTab] = useState("Overview");
@@ -101,7 +112,7 @@ const [showHouseholds, setShowHouseholds] = useState(true);
   });
 
   async function loadData() {
-    try {
+    tryc {
       setLoading(true);
 
       const [s, w, r] = await Promise.all([
@@ -256,8 +267,8 @@ const [showHouseholds, setShowHouseholds] = useState(true);
             </span>
 
             <h1>
-              {tab === "Overview" ? "Good evening 👋" : tab}
-            </h1>
+  {tab === "Overview" ? getGreeting() : tab}
+</h1>
           </div>
 
           <div className="headright">
