@@ -267,7 +267,9 @@ const [showHouseholds, setShowHouseholds] = useState(true);
             </span>
 
             <h1>
-  {tab === "Overview" ? getGreeting() : tab}
+  {tab === "Overview"
+  ? `Hour: ${new Date().getHours()} | ${getGreeting()}`
+  : tab}
 </h1>
           </div>
 
