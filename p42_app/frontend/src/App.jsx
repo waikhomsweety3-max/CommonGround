@@ -112,7 +112,7 @@ const [showHouseholds, setShowHouseholds] = useState(true);
   });
 
   async function loadData() {
-    tryc {
+    try {
       setLoading(true);
 
       const [s, w, r] = await Promise.all([
