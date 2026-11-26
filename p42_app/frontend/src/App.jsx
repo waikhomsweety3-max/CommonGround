@@ -61,7 +61,7 @@ const householdIcon = L.divIcon({
   iconAnchor: [11, 11],
 });
 
-const API = "https://commonground-fu7m.onrender.com/api";
+const API = "http://127.0.0.1:5000/api";
 
 const markerIcon = new L.Icon({
   iconUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png",
@@ -99,6 +99,7 @@ const [showHouseholds, setShowHouseholds] = useState(true);
   const [requests, setRequests] = useState([]);
   const [matches, setMatches] = useState([]);
   const [selected, setSelected] = useState(null);
+  const [selectedWorkerId, setSelectedWorkerId] = useState(null);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
@@ -110,95 +111,112 @@ const [showHouseholds, setShowHouseholds] = useState(true);
     lat: "31.22",
     lon: "75.77",
   });
+async function loadData() {
+  try {
+    setLoading(true);
 
-  async function loadData() {
-    try {
-      setLoading(true);
+    const [s, w, r] = await Promise.all([
+      fetch(`${API}/admin/stats`).then(res => res.json()),
+      fetch(`${API}/workers`).then(res => res.json()),
+      fetch(`${API}/requests`).then(res => res.json()),
+    ]);
 
-      const [s, w, r] = await Promise.all([
-        fetch(`${API}/admin/stats`).then(res => res.json()),
-        fetch(`${API}/workers`).then(res => res.json()),
-        fetch(`${API}/requests`).then(res => res.json()),
-      ]);
+    setStats(s);
+    setWorkers(w);
+    setRequests(r);
+    setMessage("");
 
-      setStats(s);
-      setWorkers(w);
-      setRequests(r);
-      setMessage("");
-    } catch (error) {
-  console.error("Backend error:", error);
-  setMessage("Backend error: " + error.message);
-} finally {
-      setLoading(false);
-    }
+  } catch (error) {
+    console.error("Backend error:", error);
+    setMessage("Backend error: " + error.message);
+
+  } finally {
+    setLoading(false);
   }
+}
+useEffect(() => {
+  loadData();
+}, []);
 
-  useEffect(() => {
-    loadData();
-  }, []);
+  
+    async function findWorkers(id) {
+  try {
+    const response = await fetch(`${API}/requests/${id}/matches`);
+    const data = await response.json();
 
+    if (!response.ok) {
+      setMessage(data.error || "Could not load worker matches.");
+      return;
+    }
+
+    setSelected(id);
+    setMatches(data.matches || []);
+    setMessage("");
+    setTab("Find Workers");
+
+  } catch (error) {
+    console.error("Find workers error:", error);
+    setMessage("Could not load worker matches.");
+  }
+}
   async function createRequest(e) {
-    e.preventDefault();
+  e.preventDefault();
 
-    try {
-      const response = await fetch(`${API}/requests`, {
+  try {
+    const response = await fetch(`${API}/requests`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ...form,
+        lat: Number(form.lat),
+        lon: Number(form.lon),
+      }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      setMessage(data.error || "Request creation failed.");
+      return;
+    }
+
+    setMessage("Service request created successfully!");
+
+    await loadData();
+    await findWorkers(data.id);
+
+  } catch (error) {
+    console.error("Create request error:", error);
+    setMessage("Unable to connect to the backend.");
+  }
+}
+async function selectWorker(workerId) {
+  try {
+    const response = await fetch(
+      `${API}/requests/${selected}/select`,
+      {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...form,
-          lat: Number(form.lat),
-          lon: Number(form.lon),
-        }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        setMessage(data.error || "Request creation failed.");
-        return;
+        body: JSON.stringify({ worker_id: workerId }),
       }
+    );
 
-      setMessage("Service request created successfully!");
+    const data = await response.json();
 
-      await loadData();
-      await findWorkers(data.id);
-    } catch {
-      setMessage("Unable to connect to the backend.");
+    if (!response.ok) {
+      setMessage(data.error || "Worker selection failed.");
+      return;
     }
+
+    setMessage("");
+    await loadData();
+
+  } catch (error) {
+    console.error("Selection error:", error);
+    setMessage("Worker selection failed.");
   }
-
-  async function findWorkers(id) {
-    try {
-      const response = await fetch(`${API}/requests/${id}/matches`);
-      const data = await response.json();
-
-      setSelected(id);
-      setMatches(data.matches || []);
-      setTab("Find Workers");
-    } catch {
-      setMessage("Could not load worker matches.");
-    }
-  }
-
-  async function selectWorker(workerId) {
-    try {
-      const response = await fetch(
-        `${API}/requests/${selected}/select`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ worker_id: workerId }),
-        }
-      );
-
-      const data = await response.json();
-
-      setMessage(data.message || data.error);
-      await loadData();
-    } catch {
-      setMessage("Worker selection failed.");
-    }
-  }
+}
+  
 
   const filteredWorkers = workers.filter(worker =>
     `${worker.name} ${worker.skills.join(" ")}`
@@ -217,6 +235,15 @@ const [showHouseholds, setShowHouseholds] = useState(true);
   ];
 
   const COLORS = ["#50bea2", "#e9a65a"];
+  const selectedRequest = requests.find(
+  r => String(r.id) === String(selected)
+);
+
+const selectedWorker = workers.find(
+  w => String(w.id) === String(selectedRequest?.selected_worker)
+);
+console.log("Selected Request:", selectedRequest);
+console.log("Selected Worker:", selectedWorker);
 
   return (
     <div className="shell">
@@ -267,9 +294,7 @@ const [showHouseholds, setShowHouseholds] = useState(true);
             </span>
 
             <h1>
-  {tab === "Overview"
-  ? `Hour: ${new Date().getHours()} | ${getGreeting()}`
-  : tab}
+  {tab === "Overview" ? getGreeting() : tab}
 </h1>
           </div>
 
@@ -600,6 +625,7 @@ const [showHouseholds, setShowHouseholds] = useState(true);
             {/* FIND WORKERS */}
 
             {tab === "Find Workers" && (
+              <>
 
               <div className="panel">
 
@@ -644,11 +670,20 @@ const [showHouseholds, setShowHouseholds] = useState(true);
                     </div>
 
                     <button
-                      className="primary smallbtn"
-                      onClick={() => selectWorker(w.id)}
-                    >
-                      Select worker
-                    </button>
+  className={`smallbtn ${
+    String(selectedRequest?.selected_worker) === String(w.id)
+      ? "selectedbtn"
+      : "primary"
+  }`}
+  onClick={() => selectWorker(w.id)}
+  disabled={!!selectedRequest?.selected_worker}
+>
+  {String(selectedRequest?.selected_worker) === String(w.id)
+    ? "✓ Selected"
+    : selectedRequest?.selected_worker
+      ? "Already Matched"
+      : "Select Worker"}
+</button>
 
                   </div>
 
@@ -662,7 +697,75 @@ const [showHouseholds, setShowHouseholds] = useState(true);
                 )}
 
               </div>
+              {selectedWorker && selectedRequest && (
+  <div className="panel" style={{ marginTop: "20px" }}>
 
+    <div className="panelhead">
+      <div>
+        <h3>Selected Worker Location</h3>
+        <p>
+          Showing {selectedWorker.name} and the household location.
+        </p>
+      </div>
+
+      <span className="pill">WORKER SELECTED</span>
+    </div>
+
+    <MapContainer
+      center={[
+        Number(selectedWorker.lat),
+        Number(selectedWorker.lon)
+      ]}
+      zoom={13}
+      scrollWheelZoom={true}
+      style={{
+        height: "350px",
+        width: "100%",
+        borderRadius: "12px"
+      }}
+    >
+
+      <TileLayer
+        attribution='&copy; OpenStreetMap contributors'
+        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+      />
+
+      <Marker
+  position={[
+    Number(selectedWorker.lat),
+    Number(selectedWorker.lon)
+  ]}
+  icon={workerIcon}
+>
+  <Popup>
+    <b>{selectedWorker.name}</b>
+    <p>Selected Worker</p>
+  </Popup>
+</Marker>
+
+      <Marker
+  position={[
+    Number(selectedRequest.lat),
+    Number(selectedRequest.lon)
+  ]}
+  icon={householdIcon}
+>
+  <Popup>
+    <b>{selectedRequest.household}</b>
+    <p>{selectedRequest.service}</p>
+    <p>Household Location</p>
+  </Popup>
+</Marker>
+
+    </MapContainer>
+
+    <div className="mapnote">
+      Worker and household locations are synthetic demonstration coordinates.
+    </div>
+
+  </div>
+)}
+</>
             )}
 
             {/* WORKERS */}
