@@ -61,7 +61,7 @@ const householdIcon = L.divIcon({
   iconAnchor: [11, 11],
 });
 
-const API = "http://127.0.0.1:5000/api";
+const API = "https://commonground-fu7m.onrender.com/api";
 
 const markerIcon = new L.Icon({
   iconUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png",
