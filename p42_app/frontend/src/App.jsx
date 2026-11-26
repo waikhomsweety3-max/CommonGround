@@ -363,7 +363,7 @@ console.log("Selected Worker:", selectedWorker);
         ))}
 
         <div className="sidebottom">
-          <div className="avatar">SW</div>
+          <div className="avatar">CG</div>
           <div>
             <b>Project Demo</b>
             <small>Administrator</small>
@@ -396,7 +396,7 @@ console.log("Selected Worker:", selectedWorker);
               <i /> System operational
             </span>
 
-            <div className="avatar">SW</div>
+            <div className="avatar">CG</div>
           </div>
         </header>
 
