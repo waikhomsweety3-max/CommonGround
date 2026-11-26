@@ -74,6 +74,7 @@ const navigation = [
   ["Overview", LayoutDashboard],
   ["Service Requests", ClipboardList],
   ["Find Workers", Search],
+  ["Worker Dashboard", Users],
   ["Workers", Users],
   ["Map View", MapPin],
   ["Analytics", Activity],
@@ -103,6 +104,9 @@ const [showHouseholds, setShowHouseholds] = useState(true);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
+  const [workerId, setWorkerId] = useState("1");
+const [invitations, setInvitations] = useState([]);
+const [history, setHistory] = useState([]);
 
   const [form, setForm] = useState({
     household: "Demo Household",
@@ -134,10 +138,88 @@ async function loadData() {
     setLoading(false);
   }
 }
+async function loadInvitations() {
+  try {
+    const response = await fetch(
+      `${API}/workers/${workerId}/invitations`
+    );
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      setMessage(data.error || "Could not load invitations.");
+      return;
+    }
+
+    setInvitations(data || []);
+    setMessage("");
+  } catch (error) {
+    console.error("Invitation loading error:", error);
+    setMessage("Unable to load worker invitations.");
+  }
+}
+async function respondToInvitation(requestId, action) {
+  try {
+    const response = await fetch(
+      `${API}/workers/${workerId}/invitations/${requestId}/respond`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action })
+      }
+    );
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      setMessage(data.error || "Could not submit response.");
+      return;
+    }
+
+    setMessage(
+      action === "accept"
+        ? "Invitation accepted successfully!"
+        : "Invitation rejected."
+    );
+
+    await loadData();
+    await loadInvitations();
+    await loadWorkerHistory();
+
+  } catch (error) {
+    console.error("Worker response error:", error);
+    setMessage("Unable to submit your response.");
+  }
+}
+async function loadWorkerHistory() {
+  try {
+    const response = await fetch(
+      `${API}/workers/${workerId}/history`
+    );
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      setMessage(data.error || "Could not load response history.");
+      return;
+    }
+
+    setHistory(data || []);
+  } catch (error) {
+    console.error("History loading error:", error);
+    setMessage("Unable to load response history.");
+  }
+}
 useEffect(() => {
   loadData();
 }, []);
 
+useEffect(() => {
+  if (tab === "Worker Dashboard") {
+    loadInvitations();
+    loadWorkerHistory();
+  }
+}, [tab, workerId]);
   
     async function findWorkers(id) {
   try {
@@ -230,11 +312,18 @@ async function selectWorker(workerId) {
   }));
 
   const matchData = [
-    { name: "Matched", value: stats.matched || 0 },
-    { name: "Pending", value: stats.pending || 0 },
-  ];
+  { name: "Matched", value: stats.matched || 0 },
+  { name: "Pending", value: stats.pending || 0 },
+  { name: "Awaiting Response", value: stats.awaiting || 0 },
+  { name: "Rejected", value: stats.rejected || 0 },
+];
 
-  const COLORS = ["#50bea2", "#e9a65a"];
+  const COLORS = [
+  "#50bea2", // Matched - Teal
+  "#e9a65a", // Pending - Orange
+  "#5489c4", // Awaiting Response - Blue
+  "#d66b6b", // Rejected - Red
+];
   const selectedRequest = requests.find(
   r => String(r.id) === String(selected)
 );
@@ -597,9 +686,16 @@ console.log("Selected Worker:", selectedWorker);
 
                       <div>
                         <b>#{r.id} · {r.service}</b>
-                        <small>
-                          {r.household} · {r.status}
-                        </small>
+                        <small>{r.household}</small>
+
+<span className={`status ${
+  r.status === "Matched" ? "matched" :
+  r.status === "Rejected" ? "rejected" :
+  r.status === "Awaiting Response" ? "awaiting" :
+  "pending"
+}`}>
+  {r.status}
+</span>
                       </div>
 
                       <button
@@ -676,13 +772,17 @@ console.log("Selected Worker:", selectedWorker);
       : "primary"
   }`}
   onClick={() => selectWorker(w.id)}
-  disabled={!!selectedRequest?.selected_worker}
+  disabled={
+  !!selectedRequest?.selected_worker &&
+  selectedRequest?.status !== "Rejected"
+}
 >
   {String(selectedRequest?.selected_worker) === String(w.id)
     ? "✓ Selected"
-    : selectedRequest?.selected_worker
-      ? "Already Matched"
-      : "Select Worker"}
+    : selectedRequest?.selected_worker &&
+  selectedRequest?.status !== "Rejected"
+    ? "Invitation Sent"
+    : "Select Worker"}
 </button>
 
                   </div>
@@ -697,7 +797,9 @@ console.log("Selected Worker:", selectedWorker);
                 )}
 
               </div>
-              {selectedWorker && selectedRequest && (
+              {selectedWorker &&
+ selectedRequest &&
+ selectedRequest.status === "Matched" && (
   <div className="panel" style={{ marginTop: "20px" }}>
 
     <div className="panelhead">
@@ -767,7 +869,161 @@ console.log("Selected Worker:", selectedWorker);
 )}
 </>
             )}
+{/* WORKER DASHBOARD */}
 
+{tab === "Worker Dashboard" && (
+  <div className="panel">
+
+    <div className="panelhead">
+      <div>
+        <h3>Worker Dashboard</h3>
+        <p>Manage incoming service invitations.</p>
+      </div>
+
+      <span className="pill">WORKER PORTAL</span>
+    </div>
+
+    <label>
+      Select worker
+
+      <select
+        value={workerId}
+        onChange={e => setWorkerId(e.target.value)}
+      >
+        {workers.map(w => (
+          <option key={w.id} value={w.id}>
+            {w.name}
+          </option>
+        ))}
+      </select>
+    </label>
+
+    <div style={{ marginTop: "24px" }}>
+      <div className="sectiontitle">
+        <div>
+          <h3>Incoming Invitations</h3>
+          <p>Requests waiting for your response.</p>
+        </div>
+
+        <span className="status pending">
+          {invitations.length} Pending
+        </span>
+      </div>
+
+      {invitations.length > 0 ? (
+        invitations.map(invitation => (
+          <div
+            className="requestrow"
+            key={invitation.id}
+            style={{ padding: "18px 0" }}
+          >
+            <div>
+              <b>{invitation.service}</b>
+
+              <small>
+                Request #{invitation.id}
+              </small>
+
+              <small>
+                Household: {invitation.household}
+              </small>
+
+              <small>
+                Details: {invitation.details || "No additional details"}
+              </small>
+
+              <small>
+                Date: {invitation.date}
+              </small>
+            </div>
+
+            <div style={{
+              display: "flex",
+              gap: "10px",
+              flexWrap: "wrap"
+            }}>
+              <button
+                className="primary"
+                onClick={() =>
+                  respondToInvitation(invitation.id, "accept")
+                }
+              >
+                ✓ Accept
+              </button>
+
+              <button
+                className="outline"
+                onClick={() =>
+                  respondToInvitation(invitation.id, "reject")
+                }
+              >
+                ✕ Reject
+              </button>
+            </div>
+          </div>
+        ))
+      ) : (
+        <div className="empty">
+          No pending invitations for this worker.
+        </div>
+      )}
+    </div>
+
+    <button
+      className="outline"
+      style={{ marginTop: "18px" }}
+      onClick={loadInvitations}
+    >
+      <RefreshCw size={15} /> Refresh Invitations
+    </button>
+    {/* RESPONSE HISTORY */}
+    <div style={{ marginTop: "32px" }}>
+      <div className="sectiontitle">
+        <div>
+          <h3>Response History</h3>
+          <p>Previously accepted and rejected invitations.</p>
+        </div>
+
+        <span className="pill">
+          {history.length} Records
+        </span>
+      </div>
+
+      {history.length > 0 ? (
+        history.map(item => (
+          <div
+            className="requestrow"
+            key={item.id}
+            style={{ padding: "18px 0" }}
+          >
+            <div>
+              <b>{item.service}</b>
+
+              <small>Request #{item.request_id}</small>
+
+              <small>Household: {item.household}</small>
+
+              <small>
+                Responded: {item.responded_at || "Not available"}
+              </small>
+            </div>
+
+            <span className={`status ${
+              item.status === "Matched" ? "matched" : "rejected"
+            }`}>
+              {item.status === "Matched" ? "Accepted" : "Rejected"}
+            </span>
+          </div>
+        ))
+      ) : (
+        <div className="empty">
+          No completed invitations yet.
+        </div>
+      )}
+    </div>
+  </div>
+
+)}
             {/* WORKERS */}
 
             {tab === "Workers" && (

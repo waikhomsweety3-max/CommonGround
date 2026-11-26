@@ -15,6 +15,14 @@ def init_db():
         c.executescript('''
         CREATE TABLE IF NOT EXISTS workers(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT,skills TEXT,experience INTEGER,lat REAL,lon REAL,radius REAL,available INTEGER DEFAULT 1,capacity INTEGER DEFAULT 3);
         CREATE TABLE IF NOT EXISTS requests(id INTEGER PRIMARY KEY AUTOINCREMENT, household TEXT, service TEXT, details TEXT, lat REAL, lon REAL, date TEXT, status TEXT DEFAULT 'Pending', selected_worker INTEGER);
+        CREATE TABLE IF NOT EXISTS worker_invitations(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    request_id INTEGER,
+    worker_id INTEGER,
+    status TEXT DEFAULT 'Awaiting Response',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    responded_at TIMESTAMP
+);
         ''')
         if c.execute('SELECT COUNT(*) FROM workers').fetchone()[0]==0:
             demo=[('Aarav Sharma','Electrician,Appliance Repair',5,31.225,75.77,10),('Meera Singh','Plumber,Home Maintenance',4,31.218,75.765,8),('Kabir Kumar','Carpenter,Painting',7,31.23,75.78,12),('Simran Kaur','Cleaning,Gardening',3,31.215,75.755,8),('Dev Patel','Electrician,Plumber',6,31.24,75.79,15)]
@@ -80,24 +88,156 @@ def matches(rid):
     return jsonify(request_id=rid,matches=eligible[:10],count=len(eligible))
 
 @app.post('/api/requests/<int:rid>/select')
-def select_worker(rid):
-    x=request.get_json() or {}; wid=x.get('worker_id')
-    with db() as c:
-        w=c.execute('SELECT id FROM workers WHERE id=? AND available=1',(wid,)).fetchone()
-        if not w: return jsonify(error='Worker unavailable or not found'),404
-        cur=c.execute("UPDATE requests SET selected_worker=?,status='Matched' WHERE id=? AND status='Pending'",(wid,rid))
-        if cur.rowcount==0: return jsonify(error='Request not found or already matched'),409
-    return jsonify(message='Worker selected',request_id=rid,worker_id=wid,status='Matched')
 
+def select_worker(rid):
+    x = request.get_json() or {}
+    wid = x.get('worker_id')
+
+    with db() as c:
+        w = c.execute(
+            'SELECT id FROM workers WHERE id=? AND available=1',
+            (wid,)
+        ).fetchone()
+
+        if not w:
+            return jsonify(error='Worker unavailable or not found'), 404
+
+        cur = c.execute(
+            """UPDATE requests
+               SET selected_worker=?, status='Awaiting Response'
+               WHERE id=? AND status IN ('Pending', 'Rejected')""",
+            (wid, rid)
+        )
+
+        if cur.rowcount == 0:
+            return jsonify(
+                error='Request not found or already assigned'
+            ), 409
+
+        # Save this invitation separately
+        c.execute(
+            """INSERT INTO worker_invitations
+               (request_id, worker_id)
+               VALUES (?, ?)""",
+            (rid, wid)
+        )
+
+    return jsonify(
+        message='Invitation sent to worker',
+        request_id=rid,
+        worker_id=wid,
+        status='Awaiting Response'
+    )
+@app.get('/api/workers/<int:wid>/invitations')
+def worker_invitations(wid):
+    with db() as c:
+        invitations = c.execute(
+            """SELECT r.*, w.name AS worker_name
+               FROM requests r
+               JOIN workers w ON r.selected_worker = w.id
+               WHERE r.selected_worker = ?
+               AND r.status = 'Awaiting Response'
+               ORDER BY r.id DESC""",
+            (wid,)
+        ).fetchall()
+
+    return jsonify([dict(x) for x in invitations])
+@app.get('/api/workers/<int:wid>/history')
+def worker_invitation_history(wid):
+    with db() as c:
+        history = c.execute(
+            """SELECT wi.*, r.household, r.service, r.details,
+                      w.name AS worker_name
+               FROM worker_invitations wi
+               JOIN requests r ON wi.request_id = r.id
+               JOIN workers w ON wi.worker_id = w.id
+               WHERE wi.worker_id = ?
+               AND wi.status IN ('Matched', 'Rejected')
+               ORDER BY wi.id DESC""",
+            (wid,)
+        ).fetchall()
+
+    return jsonify([dict(x) for x in history])
+@app.post('/api/workers/<int:wid>/invitations/<int:rid>/respond')
+def respond_to_invitation(wid, rid):
+    data = request.get_json() or {}
+    action = data.get('action')
+
+    if action not in ('accept', 'reject'):
+        return jsonify(error='Invalid response'), 400
+
+    new_status = 'Matched' if action == 'accept' else 'Rejected'
+
+    with db() as c:
+        cur = c.execute(
+            """UPDATE requests
+               SET status=?
+               WHERE id=?
+               AND selected_worker=?
+               AND status='Awaiting Response'""",
+            (new_status, rid, wid)
+        )
+
+        if cur.rowcount == 0:
+            return jsonify(
+                error='Invitation not found or already answered'
+            ), 409
+
+        c.execute(
+            """UPDATE worker_invitations
+               SET status=?, responded_at=CURRENT_TIMESTAMP
+               WHERE request_id=? AND worker_id=?
+               AND status='Awaiting Response'""",
+            (new_status, rid, wid)
+        )
+
+    return jsonify(
+        message='Invitation ' + action + 'ed',
+        request_id=rid,
+        worker_id=wid,
+        status=new_status
+    )
 @app.get('/api/admin/stats')
 def stats():
     with db() as c:
-        workers=c.execute('SELECT COUNT(*) FROM workers').fetchone()[0]
-        total=c.execute('SELECT COUNT(*) FROM requests').fetchone()[0]
-        matched=c.execute("SELECT COUNT(*) FROM requests WHERE status='Matched'").fetchone()[0]
-        pending=total-matched
-        services=[dict(x) for x in c.execute('SELECT service,COUNT(*) count FROM requests GROUP BY service')]
-    return jsonify(workers=workers,requests=total,matched=matched,pending=pending,services=services)
+        workers = c.execute(
+            'SELECT COUNT(*) FROM workers'
+        ).fetchone()[0]
 
+        total = c.execute(
+            'SELECT COUNT(*) FROM requests'
+        ).fetchone()[0]
+
+        matched = c.execute(
+            "SELECT COUNT(*) FROM requests WHERE status='Matched'"
+        ).fetchone()[0]
+
+        pending = c.execute(
+            "SELECT COUNT(*) FROM requests WHERE status='Pending'"
+        ).fetchone()[0]
+
+        awaiting = c.execute(
+            "SELECT COUNT(*) FROM requests WHERE status='Awaiting Response'"
+        ).fetchone()[0]
+
+        rejected = c.execute(
+            "SELECT COUNT(*) FROM requests WHERE status='Rejected'"
+        ).fetchone()[0]
+
+        services = [
+            dict(x) for x in c.execute(
+                'SELECT service, COUNT(*) count FROM requests GROUP BY service'
+            )
+        ]
+
+    return jsonify(
+        workers=workers,
+        requests=total,
+        matched=matched,
+        pending=pending,
+        awaiting=awaiting,
+        rejected=rejected,
+        services=services
+    )
 init_db()
 if __name__=='__main__': app.run(debug=True,port=5000)
